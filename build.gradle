@@ -1,0 +1,103 @@
+defaultTasks 'jar'
+
+/* Can't use this plugin to read in property files.  Could read them in simple
+ * fashion without variable expansion, class-typing, etc., but for now going
+ * with the least ambiguous approach of reading no property files.
+ * You can make property assignments (like for 'version', 'group' and
+ * 'ext.anything' in a "local.gradle" file.
+ */
+
+apply plugin: 'groovy'
+test.testLogging.showStandardStreams = true
+
+def localGradleFile = file('local.gradle')
+if (localGradleFile.isFile()) {
+    logger.info('''Executing optional build file 'local.gradle'.''')
+    apply from: localGradleFile
+}
+
+if (version == 'unspecified') version = '1.0.1a'
+// N.b. As of today, Bintray doesn't accept snapshots
+if (!project.hasProperty('org.name'))
+    project.ext.set('org.name', ((group == 'com.admc')
+            ? 'Axis Data Management Corp.' : System.properties['user.name']))
+if (!project.hasProperty('jar.title'))
+    project.ext.set('jar.title', (group == 'com.admc')
+            ? 'JavaPropFile Gradle plugin jar' : 'Customization')
+
+dependencies {
+    compile gradleApi()
+    //groovy localGroovy()  // Unnecessary and illegal with Gradle 2.0
+}
+
+// No effect since current Groovy compiler can't do later than 1.5.
+compileGroovy.targetCompatibility = '1.5'
+
+task noop << { }
+noop.description = 'Noop task for Gradle testing'
+
+processResources << {
+    // Add license file to META-INF subdir
+    copy {
+        from 'doc'
+        into new File(sourceSets.main.output.resourcesDir, 'META-INF')
+        include 'LICENSE.txt'
+    }
+    println 'done'
+}
+
+jar { doFirst {
+    // metaInf property apparently gone with Gradle 2.0
+    //project.metaInf << files('doc/LICENSE.txt')
+    exclude '**/.*/**'
+    jar { manifest { attributes(
+        'Specification-Title': 'JavaPropFile Gradle Plugin',
+        'Specification-Version': '1.0.1a',
+        // N.b. As of today, Bintray doesn't accept snapshots
+        'Specification-Vendor': 'Axis Data Management Corp.',
+        'Implementation-Title': project.property('jar.title'),
+        'Implementation-Version': project.version,
+        'Implementation-Vendor': project.property('org.name')
+    ) } }
+} }
+
+// This task only for SCM administrator.  Update version and execute this task.
+task updateWrapper(type: Wrapper) { doFirst {
+    assert project.hasProperty('newVersion') :
+        '''Property 'newVersion' is required for task 'updateWrapper'.'''
+    assert project.newVersion == gradle.gradleVersion :
+        "You invoked Gradle system with version $gradle.gradleVersion instead of desired version $project.newVersion"
+} }
+updateWrapper << {
+    gradleVersion = project['newVersion']
+    println 'WARNING:  Merge our customizations into the newly-generated wrapper scripts'
+}
+updateWrapper.description = 'Update Gradle version.  For SCM Administrators.'
+
+task checkTabs << {
+    FileTree tree = fileTree(dir: '..')
+    tree.exclude '**/.*/**'
+    tree.include  '*.*'
+    tree.include  'doc/*'
+    tree.include  'src/**'
+    def tabFiles = []
+    tree.each { if (it.text.indexOf('\t') > -1) tabFiles << relativePath(it) }
+    if (tabFiles.size() > 0) println '  ' + tabFiles.join('\n  ')
+}
+checkTabs.description = 'Reports on any text files containing tab characters'
+
+task sourcesJar(type: Jar, dependsOn:classes) {
+    exclude '**/.*/**'
+    classifier = 'sources'
+    from sourceSets.main.allSource
+}
+sourcesJar.description = 'Build sources jar file'
+
+task javadocJar(type: Jar, dependsOn:javadoc) {
+    exclude '**/.*/**'
+    classifier = 'javadoc'
+    from javadoc.destinationDir
+}
+javadocJar.description = 'Build javadoc jar file'
+
+test { systemProperties 'RETAIN_WORK': 'true' }

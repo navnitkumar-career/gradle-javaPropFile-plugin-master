@@ -1,0 +1,188 @@
+/**
+ * Demonstrates usage of the JavaPropFile Gradle Plugin.
+ * The default tasks exemplify and exercise property loading.
+ * The following tasks use JavaPropFile's ContentAsStringFilter copy filter:
+ *     jar, processResources, anyCopyTask, myTask
+ * Filter-processed output for the first two will go to
+ * build/resources/main/ and into build/libs/*.jar; and to build/tmp/x and
+ * build/tmp/y correspondingly for the last 2.
+ *
+ * See the JavaPropFile "readme.html" file at
+ * http://admc.com/projectdocs/gradle-javaPropFile-plugin/readme.html
+ * for a list and explanation of all provided methods and settings for the
+ * plugin.
+ */
+
+defaultTasks 'displaySomeProps', 'displaySomeSysProps', 'displayLoadedMap'
+
+buildscript {
+    repositories { jcenter() }  // Before plugin v. 1.0.0 use mavenCentral()
+    dependencies {
+        classpath 'com.admc:gradle-javaPropFile-plugin:latest.integration'
+        // For strictly repeatable builds, replace 'latest.integration' with
+        // the latest literal GA version label.
+    }
+}
+apply plugin: 'java'
+apply plugin: 'com.admc.javaPropFile'
+
+// Don't execute a non-configuration method of another plugin before you
+// load() if you want the properties file to effect the plugin method.
+// There is no problem with doing propFileLoader loads before applying plugins
+// that it configures (it will apply the settings when the target plugin comes
+// online), but of course no properties file can effect anything before that
+// properties file is loaded.
+
+// We will change this Gradle property with a properties file.
+startAsFile = file('x.txt')
+
+println('compileJava.options.debug, a ' + compileJava.options.debug.class
+        + " has default value of: $compileJava.options.debug")
+
+// You only need this import if you will change the default
+// unsatisfiedRefBehavior.
+import com.admc.gradle.JavaPropFile
+// Load any properties files that you want to.
+// propFileLoader settings will effect following .load()s.
+
+// Prohibit overwriting existing properties on our required team-shared
+// properties file.
+// For shared properties file, it's good to leave the default, conservative
+// unsatisfiedRefBehavior in place.  If there is a bad setting in a shared
+// file, we will want to know about it and fix it.
+// Sometimes we want to be able to change existing properties, sometimes not...
+propFileLoader.overwriteThrow = true
+propFileLoader.load(file('app.properties'))
+
+// Resetting .overwriteThrow setting back to it's default:
+// We're giving developers lots of power with the personal file, since it
+// won't effect other developers.
+propFileLoader.overwriteThrow = false
+propFileLoader.unsatisfiedRefBehavior = JavaPropFile.Behavior.NO_SET
+propFileLoader.typeCasting = true
+// Load option personal properties file, if present.
+// If you have no opposing constraint, consider using file name
+// 'local.properties' for this purpose.  For this example, I am sharing the
+// file with you, so I'm avoiding confusion for my own source code management
+// by not naming this file to-be-shared 'local.properties'.
+def localPropFile = file('sample-local.properties')
+if (localPropFile.isFile()) propFileLoader.load(localPropFile)
+
+println('compileJava.options.debug is now a ' + compileJava.options.debug.class
+        + " with value of: $compileJava.options.debug")
+
+
+/* Now, independent of the other examples here, I'll show you how to load a
+ * properties file targeted to one specific Gradle extension object.
+ * Since this sample depends only on the propFileLoader extension object,
+ * that's what we'll configure (though we won't actually use it afterwards,
+ * because we don't want to complicate the data from the examples above). */
+
+propFileLoader.loadIntoExtensionObject(
+        file('targeted.properties'), 'propFileLoader')
+
+/* The 2nd parameter says that non-system-properties settings in that file
+ * will apply to the propFileLoader extenaion object by default, instead of
+ * to the Gradle Project.  See "targeted.properties" for details.  */
+
+
+task displaySomeProps << {
+    Object o;
+    ['jdbcImpl.default', 'alpha', 'title', 'group', 'dest.file', 'preferences',
+    'backup.file', 'xfer.maxTime', 'dest.path', 'nested.var', 'is.typecasting',
+    'startAsFile', 'nestee', 'nester1', 'nester2', 'buildFileBaseName'
+    ].each {
+        println "Property '$it':"
+        if (project.hasProperty(it)) {
+            o = project.property(it)
+            if (o == null) {
+                println '    <NULL>'
+            } else {
+                println '    Type: ' + o.class.name
+                println "    Value: $o"
+            }
+        } else {
+            println '    <NOT_SET>'
+        }
+    }
+}
+displaySomeProps.description =
+        'Display values of my pre-defined set of properties'
+
+task displaySomeSysProps << {
+    Object o;
+    ['file.separator', 'java.io.tmpdir', 'user.home'].each {
+        println "Property '$it':"
+        if (System.properties.containsKey(it)) {
+            o = System.properties[it]
+            if (o == null) {
+                println '    <NULL>'
+            } else {
+                println '    Type: ' + o.class.name
+                println "    Value: $o"
+            }
+        } else {
+            println '    <NOT_SET>'
+        }
+    }
+}
+displaySomeSysProps.description =
+        'Display values of my pre-defined set of system properties'
+
+task displayLoadedMap << {
+    // The property-name-prefix parameter is optional.  Omit the parameter
+    // to use property names just as specified in the properties file.
+    println propFileLoader.load(file('amap.properties'), 'myNamespace|', [:])
+    // The final "[:]" parameter causes a map to be returned (as opposed to
+    // adding to the project's properties and returning nothing).
+}
+displayLoadedMap.description =
+        'Display a Map loaded from a map file with specified name-prefix'
+
+
+// ContentAsStringFilter uses:
+// As noted in "README.txt", if there is a reference failure you will have to
+// add -s to your Gradle invocation to find out the real cause.
+
+import com.admc.gradle.ContentAsStringFilter
+processResources {
+    exclude '**/.*/**'
+    // The eachFile intermediary here is how you filter a subset of a
+    // plugin-provided input file collection (in this case, the resource
+    // file collection provided by the java plugin).
+    eachFile { fcd ->
+        // Unlike Gradles plain {... } filter, our closure here will get
+        // executed just one time for each matching file.
+        if (fcd.name.startsWith('numbers'))
+            fcd.filter(ContentAsStringFilter, closure: { it.toUpperCase() })
+    }
+}
+
+task myTask << {
+    // Do anything you want, +...
+    copy {
+        from 'src/main/resources'
+        into 'build/tmp/y'
+        filter(ContentAsStringFilter, closure: { it.toLowerCase() })
+    }
+}
+myTask.description =
+        'Uses ContentAsStringFilter functionally, writing to build/tmp/y'
+
+task expand(type: Copy) {
+    System.setProperty('aSysProp', 'eins')
+    project.setProperty('aProjProp', 'zwei')
+    Map<String, Object> aMap = [aProjProp: 'drei']
+    propFileLoader.overwriteThrow = true
+    from 'src/main/resources'
+    into 'build/tmp/x'
+    filter(ContentAsStringFilter, closure: {
+        propFileLoader.expand(it)
+        //propFileLoader.expand(it, [a: map])   to expand properties from a map.
+        // See README.txt for an easy tactic if you want to do JavaPropFile
+        // expansion on files that will later have ${...} expanded by
+        // something else like Spring, Groovy, JSP EL, Velocity, Log4j...
+    })
+}
+expand.description =
+  'Uses ContentAsStringFilter + JavaPropFile.expand(), writing to build/tmp/x'
